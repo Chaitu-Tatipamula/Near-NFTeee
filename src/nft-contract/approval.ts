@@ -3,8 +3,10 @@ import { assert, bytes, near } from "near-sdk-js";
 import { Contract, NFT_METADATA_SPEC, NFT_STANDARD_NAME } from ".";
 import { assertAtLeastOneYocto, assertOneYocto, bytesForApprovedAccountId, internalAddTokenToOwner, refundDeposit, refundApprovedAccountIds, refundApprovedAccountIdsIter } from "./internal";
 import { Token } from "./metadata";
+import { attachedDeposit } from "near-sdk-js/lib/api";
 
 const GAS_FOR_NFT_ON_APPROVE = 35_000_000_000_000;
+const DEPOSIT_FOR_NFT_STORAGE = 10_000_000_000_000_000_000_000;
 
 //approve an account ID to transfer a token on your behalf
 export function internalNftApprove({
@@ -48,13 +50,21 @@ export function internalNftApprove({
     contract.tokensById.set(tokenId, token);
 
     //refund any excess storage attached by the user. If the user didn't attach enough, panic. 
-    refundDeposit(BigInt(storageUsed));
     
     //if some message was passed into the function, we initiate a cross contract call on the
     //account we're giving access to. 
     if (msg != null) {
         // Initiating receiver's call and the callback
         const promise = near.promiseBatchCreate(accountId);
+        near.promiseBatchActionFunctionCall(
+            promise, 
+            "storage_deposit", 
+            bytes(JSON.stringify({ 
+                account_id : near.predecessorAccountId()
+            })),
+            DEPOSIT_FOR_NFT_STORAGE,  
+            GAS_FOR_NFT_ON_APPROVE
+        );
         near.promiseBatchActionFunctionCall(
             promise, 
             "nft_on_approve", 
@@ -67,7 +77,8 @@ export function internalNftApprove({
             0, // no deposit 
             GAS_FOR_NFT_ON_APPROVE
         );
-
+        
+        refundDeposit(BigInt(storageUsed));
         near.promiseReturn(promise);
     }
 }
